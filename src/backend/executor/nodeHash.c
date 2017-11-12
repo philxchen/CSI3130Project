@@ -414,23 +414,28 @@ ExecChooseHashTableSize(double ntuples, int tupwidth,
 	 * memory is filled.  Set nbatch to the smallest power of 2 that appears
 	 * sufficient.
 	 */
+
+	/* CSI3130:
+	 * Set nbatch to a constant 1,
+	 * to disable the use of multiple batches
+	 */
 	if (inner_rel_bytes > hash_table_bytes)
 	{
 		/* We'll need multiple batches */
 		long		lbuckets;
-		double		dbatch;
-		int			minbatch;
+		// double		dbatch;
+		// int			minbatch;
 
 		lbuckets = (hash_table_bytes / tupsize) / NTUP_PER_BUCKET;
 		lbuckets = Min(lbuckets, INT_MAX);
 		nbuckets = (int) lbuckets;
 
-		dbatch = ceil(inner_rel_bytes / hash_table_bytes);
-		dbatch = Min(dbatch, INT_MAX / 2);
-		minbatch = (int) dbatch;
-		nbatch = 2;
-		while (nbatch < minbatch)
-			nbatch <<= 1;
+		// dbatch = ceil(inner_rel_bytes / hash_table_bytes);
+		// dbatch = Min(dbatch, INT_MAX / 2);
+		// minbatch = (int) dbatch;
+		// nbatch = 2;
+		// while (nbatch < minbatch)
+		// 	nbatch <<= 1;
 	}
 	else
 	{
@@ -441,7 +446,7 @@ ExecChooseHashTableSize(double ntuples, int tupwidth,
 		dbuckets = Min(dbuckets, INT_MAX);
 		nbuckets = (int) dbuckets;
 
-		nbatch = 1;
+		// nbatch = 1;
 	}
 
 	/*
@@ -461,7 +466,8 @@ ExecChooseHashTableSize(double ntuples, int tupwidth,
 	}
 
 	*numbuckets = nbuckets;
-	*numbatches = nbatch;
+	// *numbatches = nbatch;
+	*numbatches = 1;
 }
 
 

@@ -1444,12 +1444,15 @@ create_hashjoin_plan(PlannerInfo *root,
 					 Plan *outer_plan,
 					 Plan *inner_plan)
 {
+	/* CSI3130: 
+	 * create new variable for hashed outer plan */
 	List	   *tlist = build_relation_tlist(best_path->jpath.path.parent);
 	List	   *joinclauses;
 	List	   *otherclauses;
 	List	   *hashclauses;
 	HashJoin   *join_plan;
-	Hash	   *hash_plan;
+	Hash	   *hash_inner_plan;
+	Hash	   *hash_outer_plan;
 
 	/* Get the join qual clauses (in plain expression form) */
 	if (IS_OUTER_JOIN(best_path->jpath.jointype))
@@ -1489,13 +1492,19 @@ create_hashjoin_plan(PlannerInfo *root,
 	/*
 	 * Build the hash node and hash join node.
 	 */
-	hash_plan = make_hash(inner_plan);
+
+	/* CSI3130: make hash of outer_plan and replace the parameter of make_hashjoin 
+	 * with hashed outer_plan
+	 */
+	hash_inner_plan = make_hash(inner_plan);
+	hash_outer_plan = make_hash(outer_plan);
+	
 	join_plan = make_hashjoin(tlist,
 							  joinclauses,
 							  otherclauses,
 							  hashclauses,
-							  outer_plan,
-							  (Plan *) hash_plan,
+							  (Plan *) hash_outer_plan,
+							  (Plan *) hash_inner_plan,
 							  best_path->jpath.jointype);
 
 	copy_path_costsize(&join_plan->join.plan, &best_path->jpath.path);

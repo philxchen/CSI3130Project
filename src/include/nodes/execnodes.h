@@ -1134,7 +1134,7 @@ typedef struct HashJoinState
 	TupleTableSlot *hj_OuterTupleSlot;
 	TupleTableSlot *hj_InnerTupleSlot;
 	TupleTableSlot *hj_HashTupleSlot;
-	TupleTableSlot *hj_HashInnerTupleSlot;
+	
 	TupleTableSlot *hj_NullOuterTupleSlot;
 	TupleTableSlot *hj_NullInnerTupleSlot;
 	TupleTableSlot *hj_FirstOuterTupleSlot;

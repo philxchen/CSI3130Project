@@ -175,14 +175,17 @@ ExecHashJoin(HashJoinState *node)
 		 * execute the Hash node, to build the hash table
 		 */
 		hashNode->hashtable = hashtable;
-		(void) MultiExecProcNode((PlanState *) hashNode);
+		/* CSI3130:
+		 * Remove unnecessary logic
+		 */
+		// (void) MultiExecProcNode((PlanState *) hashNode);
 
 		/*
 		 * If the inner relation is completely empty, and we're not doing an
 		 * outer join, we can quit without scanning the outer relation.
 		 */
-		if (hashtable->totalTuples == 0 && node->js.jointype != JOIN_LEFT)
-			return NULL;
+		// if (hashtable->totalTuples == 0 && node->js.jointype != JOIN_LEFT)
+		// 	return NULL;
 
 		/*
 		 * need to remember whether nbatch has increased since we began
@@ -255,14 +258,17 @@ ExecHashJoin(HashJoinState *node)
 		 * execute the Hash node, to build the hash table
 		 */
 		outerHashNode->hashtable = outerhashtable;
-		(void) MultiExecProcNode((PlanState *) outerHashNode);
+		/* CSI3130:
+		 * Remove unnecessary logic
+		 */
+		// (void) MultiExecProcNode((PlanState *) outerHashNode);
 
 		/*
 		 * If the inner relation is completely empty, and we're not doing an
 		 * outer join, we can quit without scanning the outer relation.
 		 */
-		if (outerhashtable->totalTuples == 0 && node->js.jointype != JOIN_RIGHT)
-			return NULL;
+		// if (outerhashtable->totalTuples == 0 && node->js.jointype != JOIN_RIGHT)
+		// 	return NULL;
 
 		/*
 		 * need to remember whether nbatch has increased since we began
@@ -286,9 +292,13 @@ ExecHashJoin(HashJoinState *node)
 		/*
 		 * If we don't have an outer tuple, get the next one
 		 */
-		if (node->hj_NeedNewOuter)
+		/* CSI3130:
+		 * We always need new outer tuple
+		 * when performing symmetric hash join
+		 */
+		if (true)
 		{
-			outerTupleSlot = ExecHashJoinOuterGetTuple(outerNode,
+			outerTupleSlot = ExecHashJoinOuterGetTuple(&(outerHashNode->ps),
 													   node,
 													   &hashvalue);
 			if (TupIsNull(outerTupleSlot))

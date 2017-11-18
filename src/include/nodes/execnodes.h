@@ -1111,22 +1111,40 @@ typedef struct HashJoinTableData *HashJoinTable;
 
 typedef struct HashJoinState
 {
+	/* CSI3130:
+	 * Modify to support the symmetric hash join.
+	 * Add corresponding Inner attributes for outer attributes.
+	 */
 	JoinState	js;				/* its first field is NodeTag */
 	List	   *hashclauses;	/* list of ExprState nodes */
 	HashJoinTable hj_HashTable;
+	/* CSI3130:
+	 * Add OuterHashTable
+	 */
+	HashJoinTable hj_OuterHashTable;
 	uint32		hj_CurHashValue;
+	uint32		hj_CurInnerHashValue;
 	int			hj_CurBucketNo;
+	int			hj_CurInnerBucketNo;
 	HashJoinTuple hj_CurTuple;
+	HashJoinTuple hj_CurInnerTuple;
 	List	   *hj_OuterHashKeys;		/* list of ExprState nodes */
 	List	   *hj_InnerHashKeys;		/* list of ExprState nodes */
 	List	   *hj_HashOperators;		/* list of operator OIDs */
 	TupleTableSlot *hj_OuterTupleSlot;
+	TupleTableSlot *hj_InnerTupleSlot;
 	TupleTableSlot *hj_HashTupleSlot;
+	TupleTableSlot *hj_HashInnerTupleSlot;
+	TupleTableSlot *hj_NullOuterTupleSlot;
 	TupleTableSlot *hj_NullInnerTupleSlot;
 	TupleTableSlot *hj_FirstOuterTupleSlot;
+	TupleTableSlot *hj_FirstInnerTupleSlot;
 	bool		hj_NeedNewOuter;
+	bool		hj_NeedNewInner;
 	bool		hj_MatchedOuter;
+	bool		hj_MatchedInner;
 	bool		hj_OuterNotEmpty;
+	bool		hj_InnerNotEmpty;
 } HashJoinState;
 
 

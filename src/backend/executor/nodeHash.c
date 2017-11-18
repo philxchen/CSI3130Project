@@ -43,8 +43,50 @@ static void ExecHashIncreaseNumBatches(HashJoinTable hashtable);
 TupleTableSlot *
 ExecHash(HashState *node)
 {
-	elog(ERROR, "Hash node does not support ExecProcNode call convention");
-	return NULL;
+	/* CSI3130:
+	 * Implement ExecHash. Adapt from MultiExecHash.
+	  */
+	PlanState  *outerNode;
+	List	   *hashkeys;
+	HashJoinTable hashtable;
+	TupleTableSlot *slot;
+	ExprContext *econtext;
+	uint32		hashvalue;
+
+	/* must provide our own instrumentation support */
+	if (node->ps.instrument)
+		InstrStartNode(node->ps.instrument);
+
+	/*
+	 * get state info from node
+	 */
+	outerNode = outerPlanState(node);
+	hashtable = node->hashtable;
+
+	/*
+	 * set expression context
+	 */
+	hashkeys = node->hashkeys;
+	econtext = node->ps.ps_ExprContext;
+
+	/*
+	 * get an inner tuple and insert into the hash table (or temp files)
+	 */
+	slot = ExecProcNode(outerNode);
+	if (!TupIsNull(slot))
+	{
+		hashtable->totalTuples += 1;
+		/* We have to compute the hash value */
+		econtext->ecxt_innertuple = slot;
+		hashvalue = ExecHashGetHashValue(hashtable, econtext, hashkeys);
+		ExecHashTableInsert(hashtable, ExecFetchSlotTuple(slot), hashvalue);
+	}
+
+	/* must provide our own instrumentation support */
+	if (node->ps.instrument)
+		InstrStopNode(node->ps.instrument, true);
+	// elog(ERROR, "Hash node does not support ExecProcNode call convention");
+	return slot;
 }
 
 /* ----------------------------------------------------------------
@@ -372,23 +414,28 @@ ExecChooseHashTableSize(double ntuples, int tupwidth,
 	 * memory is filled.  Set nbatch to the smallest power of 2 that appears
 	 * sufficient.
 	 */
+
+	/* CSI3130:
+	 * Set nbatch to a constant 1,
+	 * to disable the use of multiple batches
+	 */
 	if (inner_rel_bytes > hash_table_bytes)
 	{
 		/* We'll need multiple batches */
 		long		lbuckets;
-		double		dbatch;
-		int			minbatch;
+		// double		dbatch;
+		// int			minbatch;
 
 		lbuckets = (hash_table_bytes / tupsize) / NTUP_PER_BUCKET;
 		lbuckets = Min(lbuckets, INT_MAX);
 		nbuckets = (int) lbuckets;
 
-		dbatch = ceil(inner_rel_bytes / hash_table_bytes);
-		dbatch = Min(dbatch, INT_MAX / 2);
-		minbatch = (int) dbatch;
-		nbatch = 2;
-		while (nbatch < minbatch)
-			nbatch <<= 1;
+		// dbatch = ceil(inner_rel_bytes / hash_table_bytes);
+		// dbatch = Min(dbatch, INT_MAX / 2);
+		// minbatch = (int) dbatch;
+		// nbatch = 2;
+		// while (nbatch < minbatch)
+		// 	nbatch <<= 1;
 	}
 	else
 	{
@@ -399,7 +446,7 @@ ExecChooseHashTableSize(double ntuples, int tupwidth,
 		dbuckets = Min(dbuckets, INT_MAX);
 		nbuckets = (int) dbuckets;
 
-		nbatch = 1;
+		// nbatch = 1;
 	}
 
 	/*
@@ -419,7 +466,8 @@ ExecChooseHashTableSize(double ntuples, int tupwidth,
 	}
 
 	*numbuckets = nbuckets;
-	*numbatches = nbatch;
+	// *numbatches = nbatch;
+	*numbatches = 1;
 }
 
 

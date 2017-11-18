@@ -46,7 +46,10 @@ TupleTableSlot *				/* return: a tuple or NULL */
 ExecHashJoin(HashJoinState *node)
 {
 	EState	   *estate;
-	PlanState  *outerNode;
+	/* CSI3130:
+	 * Change outerNode to the type HashState
+	 */
+	HashState  *outerNode;
 	HashState  *hashNode;
 	List	   *joinqual;
 	List	   *otherqual;
@@ -54,6 +57,7 @@ ExecHashJoin(HashJoinState *node)
 	ExprContext *econtext;
 	ExprDoneCond isDone;
 	HashJoinTable hashtable;
+	HashJoinTable outerhashtable;
 	HeapTuple	curtuple;
 	TupleTableSlot *outerTupleSlot;
 	uint32		hashvalue;
@@ -66,12 +70,19 @@ ExecHashJoin(HashJoinState *node)
 	joinqual = node->js.joinqual;
 	otherqual = node->js.ps.qual;
 	hashNode = (HashState *) innerPlanState(node);
-	outerNode = outerPlanState(node);
+	/* CSI3130:
+	 * Change outerNode to the type HashState
+	 */
+	outerNode = (HashState *) outerPlanState(node);
 
 	/*
 	 * get information from HashJoin state
 	 */
 	hashtable = node->hj_HashTable;
+	/* CSI3130:
+	 * Assign to outer hash table
+	 */
+	outerhashtable = node->hj_OuterHashTable;
 	econtext = node->js.ps.ps_ExprContext;
 
 	/*
@@ -131,7 +142,7 @@ ExecHashJoin(HashJoinState *node)
 		 * consumption by ExecHashJoinOuterGetTuple.
 		 */
 		if (node->js.jointype == JOIN_LEFT ||
-			(outerNode->plan->startup_cost < hashNode->ps.plan->total_cost &&
+			(outerNode->ps.plan->startup_cost < hashNode->ps.plan->total_cost &&
 			 !node->hj_OuterNotEmpty))
 		{
 			node->hj_FirstOuterTupleSlot = ExecProcNode(outerNode);

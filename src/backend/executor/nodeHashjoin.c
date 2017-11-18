@@ -309,6 +309,10 @@ ExecHashJoin(HashJoinState *node)
 			if (!TupIsNull(innerTupleSlot))
 			{
 				/* CSI3130:
+				 * Set node attributes for the future use of ExecScanHashBucket
+				 */
+				node->hj_HashTable = outerhashtable;
+				/* CSI3130:
 				 * Probe Outer hash table
 				 */
 				node->js.ps.ps_OuterTupleSlot = innerTupleSlot;
@@ -322,7 +326,7 @@ ExecHashJoin(HashJoinState *node)
 				*/
 				node->hj_CurHashValue = hashvalue;
 				ExecHashGetBucketAndBatch(outerhashtable, hashvalue,
-										&node->hj_CurBucketNo, &batchno);
+										  &node->hj_CurBucketNo, &batchno);
 				node->hj_CurTuple = NULL;
 
 				/*
@@ -356,10 +360,10 @@ ExecHashJoin(HashJoinState *node)
 					* we've got a match, but still need to test non-hashed quals
 					*/
 					outtuple = ExecStoreTuple(curtuple,
-											node->hj_HashInnerTupleSlot,
-											InvalidBuffer,
-											false);	/* don't pfree this tuple */
-					econtext->ecxt_innertuple = inntuple;
+											  node->hj_HashTupleSlot,
+											  InvalidBuffer,
+											  false);	/* don't pfree this tuple */
+					econtext->ecxt_innertuple = outtuple;
 
 					/* reset temp memory each time to avoid leaks from qual expr */
 					ResetExprContext(econtext);

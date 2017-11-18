@@ -47,9 +47,9 @@ ExecHashJoin(HashJoinState *node)
 {
 	EState	   *estate;
 	/* CSI3130:
-	 * Change outerNode to the type HashState
+	 * Change outerNode to the type HashState and rename to outerHashNode
 	 */
-	HashState  *outerNode;
+	HashState  *outerHashNode;
 	HashState  *hashNode;
 	List	   *joinqual;
 	List	   *otherqual;
@@ -73,7 +73,7 @@ ExecHashJoin(HashJoinState *node)
 	/* CSI3130:
 	 * Change outerNode to the type HashState
 	 */
-	outerNode = (HashState *) outerPlanState(node);
+	outerHashNode = (HashState *) outerPlanState(node);
 
 	/*
 	 * get information from HashJoin state
@@ -142,10 +142,17 @@ ExecHashJoin(HashJoinState *node)
 		 * consumption by ExecHashJoinOuterGetTuple.
 		 */
 		if (node->js.jointype == JOIN_LEFT ||
-			(outerNode->ps.plan->startup_cost < hashNode->ps.plan->total_cost &&
+			/* CSI3130:
+			 * Update the access to outerNode->ps.plan->startup_cost
+			 */
+			(outerHashNode->ps.plan->startup_cost < hashNode->ps.plan->total_cost &&
 			 !node->hj_OuterNotEmpty))
 		{
-			node->hj_FirstOuterTupleSlot = ExecProcNode(outerNode);
+			/* CSI3130:
+			 * Since we changed the type of outerHashNode to HashState,
+			 * we need to change the parameter of ExecProcNode to the PlanState in outerHashNode
+			 */
+			node->hj_FirstOuterTupleSlot = ExecProcNode(&(outerHashNode->ps));
 			if (TupIsNull(node->hj_FirstOuterTupleSlot))
 			{
 				node->hj_OuterNotEmpty = false;
@@ -189,6 +196,86 @@ ExecHashJoin(HashJoinState *node)
 		 * set it again.)
 		 */
 		node->hj_OuterNotEmpty = false;
+	}
+
+	/* CSI3130:
+	 * Build the hash table for outer relation if this is the first call.
+	 * Adapt from the above building process.
+	 */
+	if (outerhashtable == NULL)
+	{
+		/*
+		 * If the outer relation is completely empty, we can quit without
+		 * building the hash table.  However, for an inner join it is only a
+		 * win to check this when the outer relation's startup cost is less
+		 * than the projected cost of building the hash table.	Otherwise it's
+		 * best to build the hash table first and see if the inner relation is
+		 * empty.  (When it's an outer join, we should always make this check,
+		 * since we aren't going to be able to skip the join on the strength
+		 * of an empty inner relation anyway.)
+		 *
+		 * If we are rescanning the join, we make use of information gained
+		 * on the previous scan: don't bother to try the prefetch if the
+		 * previous scan found the outer relation nonempty.  This is not
+		 * 100% reliable since with new parameters the outer relation might
+		 * yield different results, but it's a good heuristic.
+		 *
+		 * The only way to make the check is to try to fetch a tuple from the
+		 * outer plan node.  If we succeed, we have to stash it away for later
+		 * consumption by ExecHashJoinOuterGetTuple.
+		 */
+		if (node->js.jointype == JOIN_RIGHT ||
+			(hashNode->ps.plan->startup_cost < outerHashNode->ps.plan->total_cost &&
+			 !node->hj_InnerNotEmpty))
+		{
+			/* CSI3130:
+			 * Since the type of hashNode is HashState,
+			 * we need to change the parameter of ExecProcNode to the PlanState in hashNode
+			 */
+			node->hj_FirstInnerTupleSlot = ExecProcNode(&(hashNode->ps));
+			if (TupIsNull(node->hj_FirstInnerTupleSlot))
+			{
+				node->hj_InnerNotEmpty = false;
+				return NULL;
+			}
+			else
+				node->hj_InnerNotEmpty = true;
+		}
+		else
+			node->hj_FirstInnerTupleSlot = NULL;
+
+		/*
+		 * create the hash table
+		 */
+		outerhashtable = ExecHashTableCreate((Hash *) outerHashNode->ps.plan,
+											 node->hj_HashOperators);
+		node->hj_OuterHashTable = outerhashtable;
+
+		/*
+		 * execute the Hash node, to build the hash table
+		 */
+		outerHashNode->hashtable = outerhashtable;
+		(void) MultiExecProcNode((PlanState *) outerHashNode);
+
+		/*
+		 * If the inner relation is completely empty, and we're not doing an
+		 * outer join, we can quit without scanning the outer relation.
+		 */
+		if (outerhashtable->totalTuples == 0 && node->js.jointype != JOIN_RIGHT)
+			return NULL;
+
+		/*
+		 * need to remember whether nbatch has increased since we began
+		 * scanning the outer relation
+		 */
+		outerhashtable->nbatch_outstart = outerhashtable->nbatch;
+
+		/*
+		 * Reset OuterNotEmpty for scan.  (It's OK if we fetched a tuple
+		 * above, because ExecHashJoinOuterGetTuple will immediately
+		 * set it again.)
+		 */
+		node->hj_InnerNotEmpty = false;
 	}
 
 	/*

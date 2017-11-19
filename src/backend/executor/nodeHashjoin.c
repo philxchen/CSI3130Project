@@ -73,7 +73,7 @@ ExecHashJoin(HashJoinState *node)
 	otherqual = node->js.ps.qual;
 	hashNode = (HashState *) innerPlanState(node);
 	/* CSI3130:
-	 * Change outerNode to the type HashState
+	 * Change outerNode to the type HashState *
 	 */
 	outerHashNode = (HashState *) outerPlanState(node);
 
@@ -209,26 +209,6 @@ ExecHashJoin(HashJoinState *node)
 	 */
 	if (outerhashtable == NULL)
 	{
-		/*
-		 * If the outer relation is completely empty, we can quit without
-		 * building the hash table.  However, for an inner join it is only a
-		 * win to check this when the outer relation's startup cost is less
-		 * than the projected cost of building the hash table.	Otherwise it's
-		 * best to build the hash table first and see if the inner relation is
-		 * empty.  (When it's an outer join, we should always make this check,
-		 * since we aren't going to be able to skip the join on the strength
-		 * of an empty inner relation anyway.)
-		 *
-		 * If we are rescanning the join, we make use of information gained
-		 * on the previous scan: don't bother to try the prefetch if the
-		 * previous scan found the outer relation nonempty.  This is not
-		 * 100% reliable since with new parameters the outer relation might
-		 * yield different results, but it's a good heuristic.
-		 *
-		 * The only way to make the check is to try to fetch a tuple from the
-		 * outer plan node.  If we succeed, we have to stash it away for later
-		 * consumption by ExecHashJoinOuterGetTuple.
-		 */
 		if (node->js.jointype == JOIN_RIGHT ||
 			(hashNode->ps.plan->startup_cost < outerHashNode->ps.plan->total_cost &&
 			 !node->hj_InnerNotEmpty))
@@ -279,7 +259,7 @@ ExecHashJoin(HashJoinState *node)
 		outerhashtable->nbatch_outstart = outerhashtable->nbatch;
 
 		/*
-		 * Reset OuterNotEmpty for scan.  (It's OK if we fetched a tuple
+		 * Reset InnerNotEmpty for scan.  (It's OK if we fetched a tuple
 		 * above, because ExecHashJoinOuterGetTuple will immediately
 		 * set it again.)
 		 */
@@ -302,17 +282,17 @@ ExecHashJoin(HashJoinState *node)
 			* Add innerTupleSlot to retrieve tuple from inner relation
 			*/
 		innerTupleSlot = ExecHashJoinOuterGetTuple(&(hashNode->ps),
-													node,
-													&hashvalue);
+												   node,
+												   &hashvalue);
 		if (!TupIsNull(innerTupleSlot))
 		{
 			/* CSI3130:
-				* Set node attributes for the future use of ExecScanHashBucket
-				*/
+			* Set node attributes for the future use of ExecScanHashBucket
+			*/
 			node->hj_HashTable = outerhashtable;
 			/* CSI3130:
-				* Probe Outer hash table
-				*/
+            * Probe Outer hash table
+            */
 			node->js.ps.ps_OuterTupleSlot = innerTupleSlot;
 			econtext->ecxt_outertuple = innerTupleSlot;
 			node->hj_NeedNewInner = false;
@@ -507,6 +487,9 @@ ExecHashJoin(HashJoinState *node)
 			}
 		}
 
+        /* CSI3130:
+         * Quit when finish traversing both inner and outer relations
+         */
 		if (TupIsNull(innerTupleSlot) && TupIsNull(outerTupleSlot))
 			return NULL;
 

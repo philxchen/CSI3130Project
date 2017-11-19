@@ -558,7 +558,11 @@ HashJoinState *
 ExecInitHashJoin(HashJoin *node, EState *estate)
 {
 	HashJoinState *hjstate;
-	Plan	   *outerNode;
+	/* CSI3130:
+	 * Change the type of outerNode to Hash*
+	 */
+	// Plan	   *outerNode;
+	Hash	   *outerNode;
 	Hash	   *hashNode;
 	List	   *lclauses;
 	List	   *rclauses;
@@ -599,10 +603,12 @@ ExecInitHashJoin(HashJoin *node, EState *estate)
 	/*
 	 * initialize child nodes
 	 */
-	outerNode = outerPlan(node);
+	// outerNode = outerPlan(node);
+	outerNode = (Hash *) outerPlan(node);
 	hashNode = (Hash *) innerPlan(node);
 
-	outerPlanState(hjstate) = ExecInitNode(outerNode, estate);
+	// outerPlanState(hjstate) = ExecInitNode(outerNode, estate);
+	outerPlanState(hjstate) = ExecInitNode((Plan *) outerNode, estate);
 	innerPlanState(hjstate) = ExecInitNode((Plan *) hashNode, estate);
 
 #define HASHJOIN_NSLOTS 3
@@ -655,8 +661,13 @@ ExecInitHashJoin(HashJoin *node, EState *estate)
 	/*
 	 * initialize hash-specific info
 	 */
+	/* CSI3130:
+	 * Initialize our added attributes
+	 */
 	hjstate->hj_HashTable = NULL;
+	hjstate->hj_OuterHashTable = NULL;
 	hjstate->hj_FirstOuterTupleSlot = NULL;
+	hjstate->hj_FirstInnerTupleSlot = NULL;
 
 	hjstate->hj_CurHashValue = 0;
 	hjstate->hj_CurBucketNo = 0;

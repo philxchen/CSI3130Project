@@ -819,6 +819,7 @@ ExecScanHashBucket(HashJoinState *hjstate,
 	{
 		if (hashTuple->hashvalue == hashvalue)
 		{
+			ereport(LOG, (errmsg("Found a matched hash value")));
 			HeapTuple	heapTuple = &hashTuple->htup;
 			TupleTableSlot *inntuple;
 

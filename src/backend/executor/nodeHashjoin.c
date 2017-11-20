@@ -201,6 +201,7 @@ ExecHashJoin(HashJoinState *node)
 		 * set it again.)
 		 */
 		node->hj_OuterNotEmpty = false;
+        ereport(LOG, (errmsg("Finished building inner hash table")));
 	}
 
 	/* CSI3130:
@@ -209,7 +210,7 @@ ExecHashJoin(HashJoinState *node)
 	 */
 	if (outerhashtable == NULL)
 	{
-		if (node->js.jointype == JOIN_RIGHT ||
+		if (node->js.jointype == JOIN_LEFT ||
 			(hashNode->ps.plan->startup_cost < outerHashNode->ps.plan->total_cost &&
 			 !node->hj_InnerNotEmpty))
 		{
@@ -264,6 +265,7 @@ ExecHashJoin(HashJoinState *node)
 		 * set it again.)
 		 */
 		node->hj_InnerNotEmpty = false;
+        ereport(LOG, (errmsg("Finished building outer hash table")));
 	}
 
 	/*
@@ -278,20 +280,24 @@ ExecHashJoin(HashJoinState *node)
 		 * We always need new outer tuple
 		 * when performing symmetric hash join
 		 */
+        /* CSI3130:
+        * Set node attributes for the future use of ExecScanHashBucket and ExecHashJoinOuterGetTuple
+        */
+        node->hj_HashTable = outerhashtable;
 		/* CSI3130:
-			* Add innerTupleSlot to retrieve tuple from inner relation
-			*/
+        * Add innerTupleSlot to retrieve tuple from inner relation
+        */
 		innerTupleSlot = ExecHashJoinOuterGetTuple(&(hashNode->ps),
 												   node,
 												   &hashvalue);
+        ereport(LOG, (errmsg("Got an inner tuple slot")));
+        ereport(LOG, (errmsg(TupIsNull(innerTupleSlot) ? "inner tuple slot is null" : "inner tuple slot is not null")));
 		if (!TupIsNull(innerTupleSlot))
 		{
 			/* CSI3130:
-			* Set node attributes for the future use of ExecScanHashBucket
-			*/
-			node->hj_HashTable = outerhashtable;
-			/* CSI3130:
-            * Probe Outer hash table
+            * Probe Outer hash table.
+            * We assigned innerTupleSlot to outer attributes to
+            * avoid creating new attributes.
             */
 			node->js.ps.ps_OuterTupleSlot = innerTupleSlot;
 			econtext->ecxt_outertuple = innerTupleSlot;
@@ -331,8 +337,11 @@ ExecHashJoin(HashJoinState *node)
 			for (;;)
 			{
 				curtuple = ExecScanHashBucket(node, econtext);
+                ereport(LOG, (errmsg(curtuple == NULL ? "curtuple is null (innerTupSlot)" : "curtuple is not null (innerTupSlot)")));
 				if (curtuple == NULL)
 					break;			/* out of matches */
+                
+                ereport(LOG, (errmsg("Got a match for inner tuple")));
 
 				/*
 				* we've got a match, but still need to test non-hashed quals
@@ -387,6 +396,8 @@ ExecHashJoin(HashJoinState *node)
 		outerTupleSlot = ExecHashJoinOuterGetTuple(&(outerHashNode->ps),
 													node,
 													&hashvalue);
+        ereport(LOG, (errmsg("Got an outer tuple slot")));
+        ereport(LOG, (errmsg(TupIsNull(innerTupleSlot) ? "outer tuple slot is null" : "outer tuple slot is not null")));                                            
 		if (!TupIsNull(outerTupleSlot))
 		{
 			/* CSI3130:
@@ -434,6 +445,7 @@ ExecHashJoin(HashJoinState *node)
 			for (;;)
 			{
 				curtuple = ExecScanHashBucket(node, econtext);
+                ereport(LOG, (errmsg(curtuple == NULL ? "curtuple is null" : "curtuple is not null")));                
 				if (curtuple == NULL)
 					break;			/* out of matches */
 
@@ -509,6 +521,42 @@ ExecHashJoin(HashJoinState *node)
 			 * the inner tuple, and return it if it passes the non-join quals.
 			 */
 			econtext->ecxt_innertuple = node->hj_NullInnerTupleSlot;
+
+			if (ExecQual(otherqual, econtext, false))
+			{
+				/*
+				 * qualification was satisfied so we project and return the
+				 * slot containing the result tuple using ExecProject().
+				 */
+				TupleTableSlot *result;
+
+				result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
+
+				if (isDone != ExprEndResult)
+				{
+					node->js.ps.ps_TupFromTlist =
+						(isDone == ExprMultipleResult);
+					return result;
+				}
+			}
+		}
+
+        /*
+		 * Now the current inner tuple has run out of matches, so check
+		 * whether to emit a dummy inner-join tuple. If not, loop around to
+		 * get a new inner tuple.
+		 */
+		node->hj_NeedNewInner = true;
+
+		if (!node->hj_MatchedInner &&
+			node->js.jointype == JOIN_RIGHT)
+		{
+			/*
+			 * We are doing an inner join and there were no join matches for
+			 * this inner tuple.  Generate a fake join tuple with nulls for
+			 * the inner tuple, and return it if it passes the non-join quals.
+			 */
+			econtext->ecxt_outertuple = node->hj_NullInnerTupleSlot;
 
 			if (ExecQual(otherqual, econtext, false))
 			{

@@ -214,8 +214,8 @@ ExecHashJoin(HashJoinState *node)
 			 * Since the type of hashNode is HashState,
 			 * we need to change the parameter of ExecProcNode to the PlanState in hashNode
 			 */
-			node->hj_FirstInnerTupleSlot = ExecProcNode(&(hashNode->ps));
-			if (TupIsNull(node->hj_FirstInnerTupleSlot))
+			node->hj_FirstOuterTupleSlot = ExecProcNode(&(hashNode->ps));
+			if (TupIsNull(node->hj_FirstOuterTupleSlot))
 			{
 				node->hj_InnerNotEmpty = false;
 				return NULL;
@@ -224,7 +224,7 @@ ExecHashJoin(HashJoinState *node)
 				node->hj_InnerNotEmpty = true;
 		}
 		else
-			node->hj_FirstInnerTupleSlot = NULL;
+			node->hj_FirstOuterTupleSlot = NULL;
 
 		/*
 		 * create the hash table
@@ -694,7 +694,6 @@ ExecInitHashJoin(HashJoin *node, EState *estate)
 	hjstate->hj_HashTable = NULL;
 	hjstate->hj_OuterHashTable = NULL;
 	hjstate->hj_FirstOuterTupleSlot = NULL;
-	hjstate->hj_FirstInnerTupleSlot = NULL;
 
 	hjstate->hj_CurHashValue = 0;
 	hjstate->hj_CurBucketNo = 0;

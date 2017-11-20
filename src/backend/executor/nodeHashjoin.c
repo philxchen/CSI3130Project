@@ -26,10 +26,6 @@
 static TupleTableSlot *ExecHashJoinOuterGetTuple(PlanState *outerNode,
 						  HashJoinState *hjstate,
 						  uint32 *hashvalue);
-static TupleTableSlot *ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
-						  BufFile *file,
-						  uint32 *hashvalue,
-						  TupleTableSlot *tupleSlot);
 static int	ExecHashJoinNewBatch(HashJoinState *hjstate);
 
 
@@ -838,7 +834,12 @@ ExecHashJoinOuterGetTuple(PlanState *outerNode,
 		 * We have just reached the end of the first pass. Try to switch to a
 		 * saved batch.
 		 */
-		curbatch = ExecHashJoinNewBatch(hjstate);
+        /* CSI3130:
+         * Since we don't have multiple batches (assumed in the assignment),
+         * we can set the curbatch to a constant 1
+         */
+		// curbatch = ExecHashJoinNewBatch(hjstate);
+        curbatch = 1;
 	}
 
 	/*
@@ -992,93 +993,10 @@ start_over:
 	return curbatch;
 }
 
-/*
- * ExecHashJoinSaveTuple
- *		save a tuple to a batch file.
- *
- * The data recorded in the file for each tuple is its hash value,
- * then an image of its HeapTupleData (with meaningless t_data pointer)
- * followed by the HeapTupleHeader and tuple data.
- *
- * Note: it is important always to call this in the regular executor
- * context, not in a shorter-lived context; else the temp file buffers
- * will get messed up.
- */
-void
-ExecHashJoinSaveTuple(HeapTuple heapTuple, uint32 hashvalue,
-					  BufFile **fileptr)
-{
-	BufFile    *file = *fileptr;
-	size_t		written;
-
-	if (file == NULL)
-	{
-		/* First write to this batch file, so open it. */
-		file = BufFileCreateTemp(false);
-		*fileptr = file;
-	}
-
-	written = BufFileWrite(file, (void *) &hashvalue, sizeof(uint32));
-	if (written != sizeof(uint32))
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to hash-join temporary file: %m")));
-
-	written = BufFileWrite(file, (void *) heapTuple, sizeof(HeapTupleData));
-	if (written != sizeof(HeapTupleData))
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to hash-join temporary file: %m")));
-
-	written = BufFileWrite(file, (void *) heapTuple->t_data, heapTuple->t_len);
-	if (written != (size_t) heapTuple->t_len)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to hash-join temporary file: %m")));
-}
-
-/*
- * ExecHashJoinGetSavedTuple
- *		read the next tuple from a batch file.	Return NULL if no more.
- *
- * On success, *hashvalue is set to the tuple's hash value, and the tuple
- * itself is stored in the given slot.
- */
-static TupleTableSlot *
-ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
-						  BufFile *file,
-						  uint32 *hashvalue,
-						  TupleTableSlot *tupleSlot)
-{
-	HeapTupleData htup;
-	size_t		nread;
-	HeapTuple	heapTuple;
-
-	nread = BufFileRead(file, (void *) hashvalue, sizeof(uint32));
-	if (nread == 0)
-		return NULL;			/* end of file */
-	if (nread != sizeof(uint32))
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not read from hash-join temporary file: %m")));
-	nread = BufFileRead(file, (void *) &htup, sizeof(HeapTupleData));
-	if (nread != sizeof(HeapTupleData))
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not read from hash-join temporary file: %m")));
-	heapTuple = palloc(HEAPTUPLESIZE + htup.t_len);
-	memcpy((char *) heapTuple, (char *) &htup, sizeof(HeapTupleData));
-	heapTuple->t_datamcxt = CurrentMemoryContext;
-	heapTuple->t_data = (HeapTupleHeader)
-		((char *) heapTuple + HEAPTUPLESIZE);
-	nread = BufFileRead(file, (void *) heapTuple->t_data, htup.t_len);
-	if (nread != (size_t) htup.t_len)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not read from hash-join temporary file: %m")));
-	return ExecStoreTuple(heapTuple, tupleSlot, InvalidBuffer, true);
-}
-
+/* CSI3130:
+ * Discard batch-file-related functions
+ * ExecHashJoinSaveTuple,
+ * ExecHashJoinGetSavedTuple */
 
 void
 ExecReScanHashJoin(HashJoinState *node, ExprContext *exprCtxt)

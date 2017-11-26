@@ -26,6 +26,10 @@
 static TupleTableSlot *ExecHashJoinOuterGetTuple(PlanState *outerNode,
 						  HashJoinState *hjstate,
 						  uint32 *hashvalue);
+static TupleTableSlot *ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
+						  BufFile *file,
+						  uint32 *hashvalue,
+						  TupleTableSlot *tupleSlot);       
 static int	ExecHashJoinNewBatch(HashJoinState *hjstate);
 
 
@@ -114,6 +118,70 @@ ExecHashJoin(HashJoinState *node)
 	 */
 	ResetExprContext(econtext);
 
+    /* CSI3130:
+	 * Build the hash table for outer relation if this is the first call.
+	 * Adapt from the above building process.
+	 */
+	if (outerhashtable == NULL)
+	{
+		if (node->js.jointype == JOIN_LEFT ||
+			(hashNode->ps.plan->startup_cost < outerHashNode->ps.plan->total_cost &&
+			 !node->hj_OuterNotEmpty))
+		{
+			/* CSI3130:
+			 * Since the type of hashNode is HashState,
+			 * we need to change the parameter of ExecProcNode to the PlanState in hashNode
+			 */
+			node->hj_FirstOuterTupleSlot = ExecProcNode(&(hashNode->ps));
+			if (TupIsNull(node->hj_FirstOuterTupleSlot))
+			{
+				node->hj_OuterNotEmpty = false;
+				return NULL;
+			}
+			else
+				node->hj_OuterNotEmpty = true;
+		}
+		else
+			node->hj_FirstOuterTupleSlot = NULL;
+
+		/*
+		 * create the hash table
+		 */
+		outerhashtable = ExecHashTableCreate((Hash *) outerHashNode->ps.plan,
+											 node->hj_HashOperators);
+		node->hj_OuterHashTable = outerhashtable;
+
+		/*
+		 * execute the Hash node, to build the hash table
+		 */
+		outerHashNode->hashtable = outerhashtable;
+		/* CSI3130:
+		 * Remove unnecessary logic
+		 */
+		// (void) MultiExecProcNode((PlanState *) outerHashNode);
+
+		/*
+		 * If the inner relation is completely empty, and we're not doing an
+		 * outer join, we can quit without scanning the outer relation.
+		 */
+		// if (outerhashtable->totalTuples == 0 && node->js.jointype != JOIN_RIGHT)
+		// 	return NULL;
+
+		/*
+		 * need to remember whether nbatch has increased since we began
+		 * scanning the outer relation
+		 */
+		outerhashtable->nbatch_outstart = outerhashtable->nbatch;
+
+		/*
+		 * Reset InnerNotEmpty for scan.  (It's OK if we fetched a tuple
+		 * above, because ExecHashJoinOuterGetTuple will immediately
+		 * set it again.)
+		 */
+		node->hj_OuterNotEmpty = false;
+        ereport(LOG, (errmsg("Finished building outer hash table")));
+	}
+
 	/*
 	 * if this is the first call, build the hash table for inner relation
 	 */
@@ -198,70 +266,6 @@ ExecHashJoin(HashJoinState *node)
 		 */
 		node->hj_OuterNotEmpty = false;
         ereport(LOG, (errmsg("Finished building inner hash table")));
-	}
-
-	/* CSI3130:
-	 * Build the hash table for outer relation if this is the first call.
-	 * Adapt from the above building process.
-	 */
-	if (outerhashtable == NULL)
-	{
-		if (node->js.jointype == JOIN_LEFT ||
-			(hashNode->ps.plan->startup_cost < outerHashNode->ps.plan->total_cost &&
-			 !node->hj_InnerNotEmpty))
-		{
-			/* CSI3130:
-			 * Since the type of hashNode is HashState,
-			 * we need to change the parameter of ExecProcNode to the PlanState in hashNode
-			 */
-			node->hj_FirstOuterTupleSlot = ExecProcNode(&(hashNode->ps));
-			if (TupIsNull(node->hj_FirstOuterTupleSlot))
-			{
-				node->hj_InnerNotEmpty = false;
-				return NULL;
-			}
-			else
-				node->hj_InnerNotEmpty = true;
-		}
-		else
-			node->hj_FirstOuterTupleSlot = NULL;
-
-		/*
-		 * create the hash table
-		 */
-		outerhashtable = ExecHashTableCreate((Hash *) outerHashNode->ps.plan,
-											 node->hj_HashOperators);
-		node->hj_OuterHashTable = outerhashtable;
-
-		/*
-		 * execute the Hash node, to build the hash table
-		 */
-		outerHashNode->hashtable = outerhashtable;
-		/* CSI3130:
-		 * Remove unnecessary logic
-		 */
-		// (void) MultiExecProcNode((PlanState *) outerHashNode);
-
-		/*
-		 * If the inner relation is completely empty, and we're not doing an
-		 * outer join, we can quit without scanning the outer relation.
-		 */
-		// if (outerhashtable->totalTuples == 0 && node->js.jointype != JOIN_RIGHT)
-		// 	return NULL;
-
-		/*
-		 * need to remember whether nbatch has increased since we began
-		 * scanning the outer relation
-		 */
-		outerhashtable->nbatch_outstart = outerhashtable->nbatch;
-
-		/*
-		 * Reset InnerNotEmpty for scan.  (It's OK if we fetched a tuple
-		 * above, because ExecHashJoinOuterGetTuple will immediately
-		 * set it again.)
-		 */
-		node->hj_InnerNotEmpty = false;
-        ereport(LOG, (errmsg("Finished building outer hash table")));
 	}
 
 	/*
@@ -441,7 +445,7 @@ ExecHashJoin(HashJoinState *node)
 			for (;;)
 			{
 				curtuple = ExecScanHashBucket(node, econtext);
-                ereport(LOG, (errmsg(curtuple == NULL ? "curtuple is null" : "curtuple is not null")));                
+                ereport(LOG, (errmsg(curtuple == NULL ? "curtuple is null (outerTupSlot)" : "curtuple is not null (outerTupSlot)")));
 				if (curtuple == NULL)
 					break;			/* out of matches */
 
@@ -846,16 +850,18 @@ ExecHashJoinOuterGetTuple(PlanState *outerNode,
 	 * as needed.  NOTE: nbatch could increase inside ExecHashJoinNewBatch, so
 	 * don't try to optimize this loop.
 	 */
-	while (curbatch < hashtable->nbatch)
-	{
-		slot = ExecHashJoinGetSavedTuple(hjstate,
-										 hashtable->outerBatchFile[curbatch],
-										 hashvalue,
-										 hjstate->hj_OuterTupleSlot);
-		if (!TupIsNull(slot))
-			return slot;
-		curbatch = ExecHashJoinNewBatch(hjstate);
-	}
+    /* CSI3130:
+     * Unnecessary logic since we discard the use of batch */
+	// while (curbatch < hashtable->nbatch)
+	// {
+	// 	slot = ExecHashJoinGetSavedTuple(hjstate,
+	// 									 hashtable->outerBatchFile[curbatch],
+	// 									 hashvalue,
+	// 									 hjstate->hj_OuterTupleSlot);
+	// 	if (!TupIsNull(slot))
+	// 		return slot;
+	// 	curbatch = ExecHashJoinNewBatch(hjstate);
+	// }
 
 	/* Out of batches... */
 	return NULL;
@@ -996,6 +1002,92 @@ start_over:
  * Discard batch-file-related functions
  * ExecHashJoinSaveTuple,
  * ExecHashJoinGetSavedTuple */
+/*
+ * ExecHashJoinSaveTuple
+ *		save a tuple to a batch file.
+ *
+ * The data recorded in the file for each tuple is its hash value,
+ * then an image of its HeapTupleData (with meaningless t_data pointer)
+ * followed by the HeapTupleHeader and tuple data.
+ *
+ * Note: it is important always to call this in the regular executor
+ * context, not in a shorter-lived context; else the temp file buffers
+ * will get messed up.
+ */
+void
+ExecHashJoinSaveTuple(HeapTuple heapTuple, uint32 hashvalue,
+					  BufFile **fileptr)
+{
+	BufFile    *file = *fileptr;
+	size_t		written;
+
+	if (file == NULL)
+	{
+		/* First write to this batch file, so open it. */
+		file = BufFileCreateTemp(false);
+		*fileptr = file;
+	}
+
+	written = BufFileWrite(file, (void *) &hashvalue, sizeof(uint32));
+	if (written != sizeof(uint32))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to hash-join temporary file: %m")));
+
+	written = BufFileWrite(file, (void *) heapTuple, sizeof(HeapTupleData));
+	if (written != sizeof(HeapTupleData))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to hash-join temporary file: %m")));
+
+	written = BufFileWrite(file, (void *) heapTuple->t_data, heapTuple->t_len);
+	if (written != (size_t) heapTuple->t_len)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to hash-join temporary file: %m")));
+}
+
+/*
+ * ExecHashJoinGetSavedTuple
+ *		read the next tuple from a batch file.	Return NULL if no more.
+ *
+ * On success, *hashvalue is set to the tuple's hash value, and the tuple
+ * itself is stored in the given slot.
+ */
+static TupleTableSlot *
+ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
+						  BufFile *file,
+						  uint32 *hashvalue,
+						  TupleTableSlot *tupleSlot)
+{
+	HeapTupleData htup;
+	size_t		nread;
+	HeapTuple	heapTuple;
+
+	nread = BufFileRead(file, (void *) hashvalue, sizeof(uint32));
+	if (nread == 0)
+		return NULL;			/* end of file */
+	if (nread != sizeof(uint32))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read from hash-join temporary file: %m")));
+	nread = BufFileRead(file, (void *) &htup, sizeof(HeapTupleData));
+	if (nread != sizeof(HeapTupleData))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read from hash-join temporary file: %m")));
+	heapTuple = palloc(HEAPTUPLESIZE + htup.t_len);
+	memcpy((char *) heapTuple, (char *) &htup, sizeof(HeapTupleData));
+	heapTuple->t_datamcxt = CurrentMemoryContext;
+	heapTuple->t_data = (HeapTupleHeader)
+		((char *) heapTuple + HEAPTUPLESIZE);
+	nread = BufFileRead(file, (void *) heapTuple->t_data, htup.t_len);
+	if (nread != (size_t) htup.t_len)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read from hash-join temporary file: %m")));
+	return ExecStoreTuple(heapTuple, tupleSlot, InvalidBuffer, true);
+}
 
 void
 ExecReScanHashJoin(HashJoinState *node, ExprContext *exprCtxt)

@@ -1145,6 +1145,21 @@ typedef struct HashJoinState
 	bool		hj_MatchedInner;
 	bool		hj_OuterNotEmpty;
 	bool		hj_InnerNotEmpty;
+
+	/* CSI3130:
+	 * Attributes for labelling whether we finishing
+	 * fetching tuples from inner and outer tables
+	 */
+	bool		hj_InnerFinish;
+	bool		hj_OuterFinish;
+	
+	/* CSI3130:
+	 * Attributes to count the number of resulting tuples
+	 * that were found by probing inner hash table and outer
+	 * hash table, respectively 
+	 */
+	int hj_CountProbingInner;
+	int hj_CountProbingOuter;
 } HashJoinState;
 
 
